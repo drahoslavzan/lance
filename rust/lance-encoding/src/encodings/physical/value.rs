@@ -156,15 +156,10 @@ impl ArrayEncoder for ValueEncoder {
             parts: encoded_buffer.parts,
             index,
         }];
-
-        let data_type = arrays[0].data_type();
-        let bits_per_value = match data_type {
-            DataType::Boolean => 1,
-            _ => 8 * data_type.byte_width() as u64,
-        };
+        
         let flat_encoding = pb::ArrayEncoding {
             array_encoding: Some(pb::array_encoding::ArrayEncoding::Flat(pb::Flat {
-                bits_per_value,
+                bits_per_value: encoded_buffer.bits_per_value,
                 buffer: Some(pb::Buffer {
                     buffer_index: index,
                     buffer_type: pb::buffer::BufferType::Page as i32,

@@ -30,6 +30,9 @@ pub struct EncodedBuffer {
     /// For example, if we are asked to write 3 primitive arrays of 1000 rows and we can write them all
     /// as one page then this will be the value buffers from the 3 primitive arrays
     pub parts: Vec<Buffer>,
+
+    /// The number of bits per value
+    pub bits_per_value: u64,
 }
 
 // Custom impl because buffers shouldn't be included in debug output
