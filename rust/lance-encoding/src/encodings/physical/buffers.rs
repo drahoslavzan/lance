@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright The Lance Authors
 
-use arrow::datatypes::{UInt8Type, UInt32Type};
-use arrow_array::{cast::AsArray, ArrayRef, GenericByteArray, PrimitiveArray};
+use std::ops::{self, AddAssign, BitAnd, BitOr, Shl, ShrAssign};
+
+use arrow::datatypes::{ArrowPrimitiveType, UInt8Type, UInt32Type};
+use arrow_array::{cast::AsArray, Array, ArrayRef, PrimitiveArray};
+
+use num_traits::{One, Zero, FromPrimitive, PrimInt, AsPrimitive};
 
 use arrow_buffer::BooleanBufferBuilder;
 use arrow_schema::DataType;
@@ -66,8 +70,21 @@ impl BufferEncoder for BitpackingBufferEncoder {
             // TODO -- here we maybe want to handle if we can't figure out the
             // number of bits -- e.g. it's a bad datatype or some other problem
             num_bits(arr.clone())
-        }).max();
+        })
+        .max()
+        .unwrap(); // TODO nounwrap
 
+        let mut packed_arrays = vec![];
+        for arr in arrays {
+            // let num_bits = num_bits(arr.clone()).unwrap();
+            let packed = pack_bits_for_type(arr.clone(), num_bits);
+            packed_arrays.push(packed.into());
+        }
+
+        Ok(EncodedBuffer{
+            bits_per_value: num_bits,
+            parts: packed_arrays,
+        })
         // let mask = 
 
         // let bytes = arrays[0].to_data().buffers()[0].clone();
@@ -79,7 +96,7 @@ impl BufferEncoder for BitpackingBufferEncoder {
         // let byte2: &[u8] = bytes.typed_data();
         // println!("{:?}", byte2);
         // byte2[0].leading_zeros();
-        todo!()
+        // todo!()
     }
 }
 
@@ -97,6 +114,38 @@ fn num_bits(arr: ArrayRef) -> Option<u64> {
             return max.map(|x| 32 - x.leading_zeros() as u64);
         },
         _ => None,
+    }
+}
+
+fn pack_bits_for_type(arr: ArrayRef, num_bits: u64) -> Vec<u8> {
+    match arr.data_type() {
+        DataType::UInt8 => {
+            let arr: &PrimitiveArray<UInt8Type> = arr.as_primitive();
+            // let buffers = arr.to_data().buffers();
+            let arr_data = arr.to_data();
+            let buffers = arr_data.buffers();
+            let mut packed_buffers = vec![];
+            for buffer in buffers {
+                let packed_buffer = pack_arrow_bits(&buffer, num_bits);
+                packed_buffers.push(packed_buffer);
+            }
+            let packed_buffers =packed_buffers.concat();
+            return packed_buffers;
+        },
+        // TODO other signed datatypes
+        DataType::UInt32 => {
+            let arr: &PrimitiveArray<UInt8Type> = arr.as_primitive();
+            let arr_data = arr.to_data();
+            let buffers = arr_data.buffers();
+            let mut packed_buffers = vec![];
+            for buffer in buffers {
+                let packed_buffer = pack_arrow_bits(&buffer, num_bits);
+                packed_buffers.push(packed_buffer);
+            }
+            let packed_buffers =packed_buffers.concat();
+            return packed_buffers;
+        },
+        _ => panic!("Unsupported datatype"),
     }
 }
 
@@ -129,6 +178,56 @@ fn pack_bits(src: Vec<u32>, num_bits: u64) -> Vec<u8> {
         }
     }
 
+    dst
+}
+
+// fn pack_arrow_bits_2<T>(arr: PrimitiveArray<T>, num_bits: u64) -> Vec<u8> 
+// where
+//     T: ArrowPrimitiveType
+// {
+//     let buffers = arr.to_data().buffers();
+//     let mut packed_buffers = vec![];
+//     for buffer in buffers {
+//         let packed_buffer = pack_arrow_bits(&buffer, num_bits);
+//         packed_buffers.push(packed_buffer);
+//     }
+//     let packed_buffers =packed_buffers.concat();
+//     return packed_buffers;
+// }
+
+fn pack_arrow_bits<T>(src: &[T], num_bits: u64) -> Vec<u8>
+where
+    T: num_traits::PrimInt + FromPrimitive + AsPrimitive<u8> + ShrAssign<u64>,
+{
+    let mut dst = vec![0u8; (src.len() * num_bits as usize ) / 8 + 1];
+    let dst_bit_len: u64 = 8;
+    let mut dst_idx = 0;
+    let mut dst_offset: u64 = 0;
+
+    let mut mask: T = FromPrimitive::from_u8(0).unwrap();
+    for _ in 0..num_bits {
+        mask = mask << 1 | FromPrimitive::from_u8(1).unwrap();
+    }
+
+    for src_idx in 0..src.len() {
+        let mut curr_src = src[src_idx] & mask;
+        let mut src_bits_written = 0;
+
+        while src_bits_written < num_bits {
+            // let tmp = 
+            // let tmp2:u8 = tmp.as_();
+            dst[dst_idx] += (curr_src << dst_offset.as_()).as_() as u8;
+            let bits_written = (num_bits - src_bits_written).min(dst_bit_len - dst_offset);
+            src_bits_written += bits_written;
+            dst_offset += bits_written;
+            curr_src >>= bits_written;
+
+            if dst_offset == dst_bit_len {
+                dst_idx += 1;
+                dst_offset = 0;
+            }
+        }
+    }
     dst
 }
 
