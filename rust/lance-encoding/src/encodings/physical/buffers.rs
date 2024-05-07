@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright The Lance Authors
 
-use std::ops::{self, AddAssign, BitAnd, BitOr, Shl, ShrAssign};
+use std::{fmt::Debug, ops::{self, AddAssign, BitAnd, BitOr, Shl, ShrAssign}};
 
 use arrow::datatypes::{ArrowPrimitiveType, UInt8Type, UInt32Type};
 use arrow_array::{cast::AsArray, Array, ArrayRef, PrimitiveArray};
@@ -66,13 +66,18 @@ pub struct BitpackingBufferEncoder {}
 
 impl BufferEncoder for BitpackingBufferEncoder {
     fn encode(&self, arrays: &[ArrayRef]) -> Result<EncodedBuffer> {
-        let num_bits = arrays.iter().filter_map(|arr| {
+        let mut num_bits = arrays.iter().filter_map(|arr| {
             // TODO -- here we maybe want to handle if we can't figure out the
             // number of bits -- e.g. it's a bad datatype or some other problem
             num_bits(arr.clone())
         })
         .max()
         .unwrap(); // TODO nounwrap
+        
+        // TODO handle case where there are no arrays or all the arrays are full of zeros
+        if num_bits == 0 {
+            panic!("TODO handle zero length bitpacking")
+        }
 
         let mut packed_arrays = vec![];
         for arr in arrays {
@@ -100,17 +105,18 @@ impl BufferEncoder for BitpackingBufferEncoder {
     }
 }
 
+// TODO write some unit tests for this
 fn num_bits(arr: ArrayRef) -> Option<u64> {
     match arr.data_type() {
         DataType::UInt8 => {
             let arr: &PrimitiveArray<UInt8Type> = arr.as_primitive();
-            let max = arrow::compute::bit_and(arr);
+            let max = arrow::compute::bit_or(arr);
             return max.map(|x| 8 - x.leading_zeros() as u64);
         },
-        // TODO other signed datatypes
+        // TODO other datatypes incl signed
         DataType::UInt32 => {
             let arr: &PrimitiveArray<UInt32Type> = arr.as_primitive();
-            let max = arrow::compute::bit_and(arr);
+            let max = arrow::compute::bit_or(arr);
             return max.map(|x| 32 - x.leading_zeros() as u64);
         },
         _ => None,
@@ -134,12 +140,14 @@ fn pack_bits_for_type(arr: ArrayRef, num_bits: u64) -> Vec<u8> {
         },
         // TODO other signed datatypes
         DataType::UInt32 => {
-            let arr: &PrimitiveArray<UInt8Type> = arr.as_primitive();
+            println!("arr {:?}, num_bits {:?}", arr, num_bits);
+            // let arr: &PrimitiveArray<UInt32Type> = arr.as_primitive();
             let arr_data = arr.to_data();
+            println!("arr_data type = {:?}", arr_data.data_type());
             let buffers = arr_data.buffers();
             let mut packed_buffers = vec![];
             for buffer in buffers {
-                let packed_buffer = pack_arrow_bits(&buffer, num_bits);
+                let packed_buffer = pack_bits_again_2(&buffer, num_bits, 4);
                 packed_buffers.push(packed_buffer);
             }
             let packed_buffers =packed_buffers.concat();
@@ -197,7 +205,8 @@ fn pack_bits(src: Vec<u32>, num_bits: u64) -> Vec<u8> {
 
 fn pack_arrow_bits<T>(src: &[T], num_bits: u64) -> Vec<u8>
 where
-    T: num_traits::PrimInt + FromPrimitive + AsPrimitive<u8> + ShrAssign<u64>,
+    // TODO, don't really need Debug here
+    T: num_traits::PrimInt + FromPrimitive + AsPrimitive<u8> + ShrAssign<u64> + Debug,
 {
     let mut dst = vec![0u8; (src.len() * num_bits as usize ) / 8 + 1];
     let dst_bit_len: u64 = 8;
@@ -220,6 +229,7 @@ where
             let bits_written = (num_bits - src_bits_written).min(dst_bit_len - dst_offset);
             src_bits_written += bits_written;
             dst_offset += bits_written;
+            println!("{:?} {}", curr_src, bits_written);
             curr_src >>= bits_written;
 
             if dst_offset == dst_bit_len {
@@ -228,6 +238,59 @@ where
             }
         }
     }
+    dst
+}
+
+fn pack_bits_again_2(src: &[u8], num_bits: u64, byte_len: u64) -> Vec<u8> {
+    let len = src.len() * num_bits as usize / (byte_len as usize * 8) + 1;
+    let mut dst = vec![0u8; len];
+    let mut dst_idx = 0;
+    let mut dst_offset = 0;
+
+    let mut mask = 0u64;
+    for _ in 0..num_bits {
+        mask = mask << 1 | 1;
+    }
+
+    let mut src_idx = 0;
+    while src_idx < src.len() {
+        let mut curr_mask = mask;
+        let mut curr_src = src[src_idx] & curr_mask as u8;
+        let mut src_offset = 0;
+        let mut src_bits_written = 0;
+
+        while src_bits_written < num_bits {
+            dst[dst_idx] += (curr_src >> src_offset) << dst_offset;
+            let bits_written = (num_bits - src_bits_written).min(8 - src_offset).min(8 - dst_offset);
+            src_bits_written += bits_written;
+            dst_offset += bits_written;
+            src_offset += bits_written;
+
+            if dst_offset == 8 {
+                dst_idx += 1;
+                dst_offset = 0;
+            }
+
+            if src_offset == 8 {
+                src_idx += 1;
+                src_offset = 0;
+                curr_mask >>= 8;
+                if src_idx == src.len() {
+                    break
+                }
+                curr_src = src[src_idx] & curr_mask as u8;
+            }
+        }
+
+        // TODO -- advance source_offset to the next byte if we're not at the end
+        let mut bytes_written = num_bits / (byte_len * 8);
+        if byte_len % num_bits != 0 {
+            bytes_written += 1;
+        }
+        println!("{} - {}", byte_len, bytes_written);
+        src_idx += (byte_len - bytes_written + 1) as usize;
+    }
+
     dst
 }
 
@@ -241,9 +304,9 @@ pub mod test {
 
     #[test]
     fn test_2() {
-        // TODO delete this
-        let x: i16 = -3;
-        println!("{} {:?}", format!("{:b}", x), x.leading_zeros());
+        let mut x: u32 = 97;
+        x >>= 8u64;
+        println!("{}", x);
     }
 
     #[test]
@@ -266,9 +329,13 @@ pub mod test {
 
     #[test]
     fn test_pack_bits() {
-        let src = vec![1, 2, 3, 4, 5, 6, 7];
+        // let src = vec![1, 2, 3, 4, 5, 6, 7];
+        let src = UInt32Array::from_iter(vec![1, 2, 3, 4, 5, 6, 7]);
+        let data = src.to_data();
         let num_bits = 3;
-        let result = pack_bits(src, num_bits);
+        // let result = pack_bits(src, num_bits);
+        let buffer = &data.buffers()[0];
+        let result = pack_bits_again_2(&buffer, num_bits, 4);
         
         let result_str: Vec<String> = result.iter().map(|x| format!("{:08b}", x)).collect();
         let expected_str = vec![

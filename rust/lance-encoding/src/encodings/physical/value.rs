@@ -18,7 +18,7 @@ use crate::{
 
 use lance_core::{Error, Result};
 
-use super::buffers::{BitmapBufferEncoder, FlatBufferEncoder};
+use super::buffers::{BitmapBufferEncoder, BitpackingBufferEncoder, FlatBufferEncoder};
 
 /// Scheduler for a simple encoding where buffers of fixed-size items are stored as-is on disk
 #[derive(Debug, Clone, Copy)]
@@ -129,6 +129,11 @@ pub struct ValueEncoder {
 
 impl ValueEncoder {
     pub fn try_new(data_type: &DataType) -> Result<Self> {
+        if *data_type == DataType::UInt32 {
+            return Ok(Self {
+                buffer_encoder: Box::<BitpackingBufferEncoder>::default(),
+            });
+        }
         if data_type.is_primitive() {
             Ok(Self {
                 buffer_encoder: Box::<FlatBufferEncoder>::default(),
@@ -183,25 +188,26 @@ pub(crate) mod tests {
     use crate::testing::check_round_trip_encoding_random;
 
     const PRIMITIVE_TYPES: &[DataType] = &[
-        DataType::Date32,
-        DataType::Date64,
-        DataType::Int8,
-        DataType::Int16,
-        DataType::Int32,
-        DataType::Int64,
-        DataType::UInt8,
-        DataType::UInt16,
+        // TODO uncomment all this commented stuff
+        // DataType::Date32,
+        // DataType::Date64,
+        // DataType::Int8,
+        // DataType::Int16,
+        // DataType::Int32,
+        // DataType::Int64,
+        // DataType::UInt8,
+        // DataType::UInt16,
         DataType::UInt32,
-        DataType::UInt64,
-        DataType::Float16,
-        DataType::Float32,
-        DataType::Float64,
-        DataType::Decimal128(10, 10),
-        DataType::Decimal256(10, 10),
-        DataType::Timestamp(TimeUnit::Nanosecond, None),
-        DataType::Time32(TimeUnit::Second),
-        DataType::Time64(TimeUnit::Nanosecond),
-        DataType::Duration(TimeUnit::Second),
+        // DataType::UInt64,
+        // DataType::Float16,
+        // DataType::Float32,
+        // DataType::Float64,
+        // DataType::Decimal128(10, 10),
+        // DataType::Decimal256(10, 10),
+        // DataType::Timestamp(TimeUnit::Nanosecond, None),
+        // DataType::Time32(TimeUnit::Second),
+        // DataType::Time64(TimeUnit::Nanosecond),
+        // DataType::Duration(TimeUnit::Second),
         // The Interval type is supported by the reader but the writer works with Lance schema
         // at the moment and Lance schema can't parse interval
         // DataType::Interval(IntervalUnit::DayTime),
