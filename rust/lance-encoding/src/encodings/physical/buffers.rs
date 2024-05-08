@@ -345,4 +345,18 @@ pub mod test {
 
         assert_eq!(result_str, expected_str);
     }
+
+    #[test]
+    fn test_pack_bits_2() {
+        let src = UInt32Array::from_iter(vec![1394040161,1641705277]);
+        let data = src.to_data();
+        let num_bits = 32;
+        let buffer = &data.buffers()[0];
+        let result = pack_bits_again_2(&buffer, num_bits, 4);
+        let mut expected = vec![];
+        for i in buffer.into_iter() {
+            expected.push(*i);
+        }
+        assert_eq!(result, expected);
+    }
 }
