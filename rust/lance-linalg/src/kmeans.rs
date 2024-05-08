@@ -47,7 +47,7 @@ pub enum KMeanInit {
 
 /// KMean Training Parameters
 #[derive(Debug)]
-pub struct KMeansParams<T: ArrowFloatType> {
+pub struct KMeansParams {
     /// Max number of iterations.
     pub max_iters: u32,
 
@@ -63,13 +63,9 @@ pub struct KMeansParams<T: ArrowFloatType> {
 
     /// The metric to calculate distance.
     pub metric_type: MetricType,
-
-    /// Centroids to continuous training. If present, it will continuously train
-    /// from the given centroids. If None, it will initialize centroids via init method.
-    pub centroids: Option<Arc<T::ArrayType>>,
 }
 
-impl<T: ArrowFloatType> Default for KMeansParams<T> {
+impl Default for KMeansParams {
     fn default() -> Self {
         Self {
             max_iters: 50,
@@ -77,12 +73,11 @@ impl<T: ArrowFloatType> Default for KMeansParams<T> {
             redos: 1,
             init: KMeanInit::Random,
             metric_type: MetricType::L2,
-            centroids: None,
         }
     }
 }
 
-impl<T: ArrowFloatType> KMeansParams<T> {
+impl KMeansParams {
     /// Create a new KMeansParams with cosine distance.
     #[allow(dead_code)]
     fn cosine() -> Self {
@@ -348,7 +343,7 @@ where
     pub async fn new_with_params(
         data: &FixedSizeListArray,
         k: usize,
-        params: &KMeansParams<T>,
+        params: &KMeansParams,
     ) -> Result<Self> {
         let dimension = data.value_length() as usize;
         let n = data.len();
@@ -385,17 +380,10 @@ where
         // TODO: use seed for Rng.
         let rng = SmallRng::from_entropy();
         for redo in 1..=params.redos {
-            let mut kmeans = if let Some(centroids) = params.centroids.as_ref() {
-                // Use existing centroids.
-                Self::with_centroids(centroids.clone(), dimension, params.metric_type)
-            } else {
-                match params.init {
-                    KMeanInit::Random => {
-                        Self::init_random(&mat, k, params.metric_type, rng.clone())?
-                    }
-                    KMeanInit::KMeanPlusPlus => {
-                        unimplemented!()
-                    }
+            let mut kmeans = match params.init {
+                KMeanInit::Random => Self::init_random(&mat, k, params.metric_type, rng.clone())?,
+                KMeanInit::KMeanPlusPlus => {
+                    unimplemented!()
                 }
             };
 

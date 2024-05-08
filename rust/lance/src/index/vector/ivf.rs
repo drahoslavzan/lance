@@ -1625,7 +1625,6 @@ async fn do_train_ivf_model<T: ArrowFloatType + Dot + Cosine + L2 + 'static>(
     const REDOS: usize = 1;
     let centroids = lance_index::vector::kmeans::train_kmeans::<T>(
         data,
-        None,
         dimension,
         params.num_partitions,
         params.max_iters as u32,

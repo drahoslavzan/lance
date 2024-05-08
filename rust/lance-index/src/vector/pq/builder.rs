@@ -107,7 +107,6 @@ impl PQBuildParams {
                 let rng = rand::rngs::SmallRng::from_entropy();
                 train_kmeans::<T>(
                     sub_vec.as_ref(),
-                    None,
                     sub_vector_dimension,
                     num_centroids,
                     self.max_iters as u32,
