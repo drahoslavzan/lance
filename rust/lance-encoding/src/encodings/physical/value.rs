@@ -161,7 +161,7 @@ impl ArrayEncoder for ValueEncoder {
             parts: encoded_buffer.parts,
             index,
         }];
-        
+
         let flat_encoding = pb::ArrayEncoding {
             array_encoding: Some(pb::array_encoding::ArrayEncoding::Flat(pb::Flat {
                 bits_per_value: encoded_buffer.bits_per_value,

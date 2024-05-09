@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright The Lance Authors
 
-use std::{fmt::Debug, ops::{self, AddAssign, BitAnd, BitOr, Shl, ShrAssign}};
-
-use arrow::{array::ArrayData, datatypes::{ArrowPrimitiveType, UInt32Type, UInt8Type}};
+use arrow::{
+    array::ArrayData,
+    datatypes::{ArrowPrimitiveType, UInt16Type, UInt32Type, UInt64Type, UInt8Type},
+};
 use arrow_array::{cast::AsArray, Array, ArrayRef, PrimitiveArray};
-
-use num_traits::{One, Zero, FromPrimitive, PrimInt, AsPrimitive};
-
 use arrow_buffer::BooleanBufferBuilder;
 use arrow_schema::DataType;
+use num_traits::{AsPrimitive, PrimInt};
+use snafu::{location, Location};
+
 use lance_arrow::DataTypeExt;
-use lance_core::Result;
+use lance_core::{Error, Result};
 
 use crate::encoder::{BufferEncoder, EncodedBuffer};
 
@@ -26,7 +27,10 @@ impl BufferEncoder for FlatBufferEncoder {
             .iter()
             .map(|arr| arr.to_data().buffers()[0].clone())
             .collect::<Vec<_>>();
-        Ok(EncodedBuffer { bits_per_value, parts })
+        Ok(EncodedBuffer {
+            bits_per_value,
+            parts,
+        })
     }
 }
 
@@ -56,7 +60,10 @@ impl BufferEncoder for BitmapBufferEncoder {
         }
         let buffer = builder.finish().into_inner();
         let parts = vec![buffer];
-        let buffer = EncodedBuffer { bits_per_value: 1, parts };
+        let buffer = EncodedBuffer {
+            bits_per_value: 1,
+            parts,
+        };
         Ok(buffer)
     }
 }
@@ -66,14 +73,12 @@ pub struct BitpackingBufferEncoder {}
 
 impl BufferEncoder for BitpackingBufferEncoder {
     fn encode(&self, arrays: &[ArrayRef]) -> Result<EncodedBuffer> {
-        let mut num_bits = arrays.iter().filter_map(|arr| {
-            // TODO -- here we maybe want to handle if we can't figure out the
-            // number of bits -- e.g. it's a bad datatype or some other problem
-            num_bits(arr.clone())
-        })
-        .max()
-        .unwrap(); // TODO nounwrap
-        
+        let mut num_bits = 0;
+        for arr in arrays {
+            let arr_max = compute_num_bits(arr.clone())?;
+            num_bits = num_bits.max(arr_max);
+        }
+
         // TODO handle case where there are no arrays or all the arrays are full of zeros
         if num_bits == 0 {
             panic!("TODO handle zero length bitpacking")
@@ -81,54 +86,57 @@ impl BufferEncoder for BitpackingBufferEncoder {
 
         let mut packed_arrays = vec![];
         for arr in arrays {
-            // let num_bits = num_bits(arr.clone()).unwrap();
-            let packed = pack_bits_for_type(arr.clone(), num_bits);
+            let packed = pack_array(arr.clone(), num_bits)?;
             packed_arrays.push(packed.into());
         }
 
-        Ok(EncodedBuffer{
+        Ok(EncodedBuffer {
             bits_per_value: num_bits,
             parts: packed_arrays,
         })
-        // let mask = 
-
-        // let bytes = arrays[0].to_data().buffers()[0].clone();
-        // let mut val_byte_chunk = bytes.chunks(byte_width);
-        // let chunk = val_byte_chunk.next().unwrap();
-        // let mb = min_bits(chunk);
-
-        // // arrays[0].as_primitive()
-        // let byte2: &[u8] = bytes.typed_data();
-        // println!("{:?}", byte2);
-        // byte2[0].leading_zeros();
-        // todo!()
     }
 }
 
 // TODO write some unit tests for this
-fn num_bits(arr: ArrayRef) -> Option<u64> {
-    match arr.data_type() {
-        DataType::UInt8 => {
-            let arr: &PrimitiveArray<UInt8Type> = arr.as_primitive();
-            let max = arrow::compute::bit_or(arr);
-            return max.map(|x| 8 - x.leading_zeros() as u64);
-        },
-        // TODO other datatypes incl signed
-        DataType::UInt32 => {
-            let arr: &PrimitiveArray<UInt32Type> = arr.as_primitive();
-            let max = arrow::compute::bit_or(arr);
-            return max.map(|x| 32 - x.leading_zeros() as u64);
-        },
+fn compute_num_bits(arr: ArrayRef) -> Result<u64> {
+    let max = match arr.data_type() {
+        DataType::UInt8 => num_bits_for_type::<UInt8Type>(arr.as_primitive()),
+        DataType::UInt16 => num_bits_for_type::<UInt16Type>(arr.as_primitive()),
+        DataType::UInt32 => num_bits_for_type::<UInt32Type>(arr.as_primitive()),
+        DataType::UInt64 => num_bits_for_type::<UInt64Type>(arr.as_primitive()),
         _ => None,
-    }
+    };
+
+    max.ok_or(Error::InvalidInput {
+        source: format!(
+            "Invalid type supplied to compute bits for bitpacking: {}",
+            arr.data_type()
+        )
+        .into(),
+        location: location!(),
+    })
 }
 
-fn pack_bits_for_type(arr: ArrayRef, num_bits: u64) -> Vec<u8> {
+fn num_bits_for_type<T>(arr: &PrimitiveArray<T>) -> Option<u64>
+where
+    T: ArrowPrimitiveType,
+    T::Native: PrimInt + AsPrimitive<u64>,
+{
+    let max = arrow::compute::bit_or(arr);
+    max.map(|x| arr.data_type().byte_width() as u64 * 8 - x.leading_zeros() as u64)
+}
+
+fn pack_array(arr: ArrayRef, num_bits: u64) -> Result<Vec<u8>> {
     match arr.data_type() {
-        DataType::UInt8 | DataType::UInt32 => {
-            pack_buffers(arr.to_data(), num_bits, arr.data_type().byte_width())
-        },
-        _ => panic!("Unsupported datatype"),
+        DataType::UInt8 | DataType::UInt32 => Ok(pack_buffers(
+            arr.to_data(),
+            num_bits,
+            arr.data_type().byte_width(),
+        )),
+        _ => Err(Error::InvalidInput {
+            source: format!("Invalid data type for bitpacking: {}", arr.data_type()).into(),
+            location: location!(),
+        }),
     }
 }
 
@@ -141,7 +149,6 @@ fn pack_buffers(data: ArrayData, num_bits: u64, byte_len: usize) -> Vec<u8> {
     }
     packed_buffers.concat()
 }
-
 
 fn pack_bits(src: &[u8], num_bits: u64, byte_len: usize) -> Vec<u8> {
     // calculate the total number of bytes we need to allocate for the destination.
@@ -173,7 +180,9 @@ fn pack_bits(src: &[u8], num_bits: u64, byte_len: usize) -> Vec<u8> {
 
         while src_bits_written < num_bits {
             dst[dst_idx] += (curr_src >> src_offset) << dst_offset;
-            let bits_written = (num_bits - src_bits_written).min(8 - src_offset).min(8 - dst_offset);
+            let bits_written = (num_bits - src_bits_written)
+                .min(8 - src_offset)
+                .min(8 - dst_offset);
             src_bits_written += bits_written;
             dst_offset += bits_written;
             src_offset += bits_written;
@@ -188,7 +197,7 @@ fn pack_bits(src: &[u8], num_bits: u64, byte_len: usize) -> Vec<u8> {
                 src_offset = 0;
                 curr_mask >>= 8;
                 if src_idx == src.len() {
-                    break
+                    break;
                 }
                 curr_src = src[src_idx] & curr_mask as u8;
             }
@@ -212,25 +221,18 @@ fn pack_bits(src: &[u8], num_bits: u64, byte_len: usize) -> Vec<u8> {
     dst
 }
 
-
 #[cfg(test)]
 pub mod test {
     use super::*;
-    
-    use std::sync::Arc;
-    use arrow_array::{Int32Array, UInt32Array};
 
-    #[test]
-    fn test_2() {
-        let mut x: u32 = 97;
-        x >>= 8u64;
-        println!("{}", x);
-    }
+    use arrow_array::{Int32Array, UInt32Array};
+    use std::sync::Arc;
 
     #[test]
     fn test_bitpacking_encoder() {
+        // TODO -- this is kind of a useless test
         let arr1 = UInt32Array::from_iter(vec![1, 2, 3]);
-        let encoder = BitpackingBufferEncoder{};
+        let encoder = BitpackingBufferEncoder {};
         let arrs = vec![Arc::new(arr1) as ArrayRef];
         let result = encoder.encode(&arrs);
         assert_eq!(result.is_ok(), true);
@@ -238,38 +240,35 @@ pub mod test {
 
     #[test]
     fn test_bitpacking_encoder1() {
+        // TODO should refactor this into a test about an unsupported datatype
         let arr1 = Int32Array::from_iter(vec![1, 2, 3, -1, -2, -3]);
-        let encoder = BitpackingBufferEncoder{};
+        let encoder = BitpackingBufferEncoder {};
         let arrs = vec![Arc::new(arr1) as ArrayRef];
         let result = encoder.encode(&arrs);
+        println!("{:?}", result);
         assert_eq!(result.is_ok(), true);
     }
 
     #[test]
-    fn test_pack_bits() {
-        // let src = vec![1, 2, 3, 4, 5, 6, 7];
+    fn test_pack_bits_less_than_one_byte() {
         let src = UInt32Array::from_iter(vec![1, 2, 3, 4, 5, 6, 7]);
         let data = src.to_data();
         let num_bits = 3;
-        // let result = pack_bits(src, num_bits);
         let buffer = &data.buffers()[0];
         let result = pack_bits(&buffer, num_bits, 4);
-        
+
         let result_str: Vec<String> = result.iter().map(|x| format!("{:08b}", x)).collect();
-        let expected_str = vec![
-            0b11_010_001,
-            0b0_101_100_0,
-            0b111_11].iter().map(|x| format!("{:08b}", x)).collect::<Vec<String>>();
+        let expected_str = vec![0b11_010_001, 0b0_101_100_0, 0b111_11]
+            .iter()
+            .map(|x| format!("{:08b}", x))
+            .collect::<Vec<String>>();
 
         assert_eq!(result_str, expected_str);
     }
 
     #[test]
-    fn test_pack_bits_2() {
-        let src = UInt32Array::from_iter(
-            // vec![1394040161,1641705277],
-            vec![0x01020304, 0x05060708]
-        );
+    fn test_pack_where_aligned_with_datatype() {
+        let src = UInt32Array::from_iter(vec![0x01020304, 0x05060708]);
         let data = src.to_data();
         let num_bits = 32;
         let buffer = &data.buffers()[0];
