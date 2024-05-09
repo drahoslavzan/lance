@@ -242,8 +242,17 @@ where
 }
 
 fn pack_bits_again_2(src: &[u8], num_bits: u64, byte_len: u64) -> Vec<u8> {
-    let len = src.len() * num_bits as usize / (byte_len as usize * 8) + 1;
-    let mut dst = vec![0u8; len];
+    // calculate the total number of bytes we need to allocate for the destination.
+    // this will be the number of items in the source array times the number of bits.
+    let src_items = src.len() / byte_len as usize;
+    let mut dst_bytes_total = src_items * num_bits as usize / 8;
+
+    // if if there's a partial byte at the end, we need to allocate one more byte
+    if (src_items * num_bits as usize) % 8 != 0 {
+        dst_bytes_total += 1;
+    }
+
+    let mut dst = vec![0u8; dst_bytes_total];
     let mut dst_idx = 0;
     let mut dst_offset = 0;
 
@@ -282,13 +291,19 @@ fn pack_bits_again_2(src: &[u8], num_bits: u64, byte_len: u64) -> Vec<u8> {
             }
         }
 
-        // TODO -- advance source_offset to the next byte if we're not at the end
-        let mut bytes_written = num_bits / (byte_len * 8);
-        if byte_len % num_bits != 0 {
-            bytes_written += 1;
+        // advance source_offset to the next byte if we're not at the end..
+        // note that we don't need to do this if we wrote the full number of bits
+        // because source index would have been advanced by the inner loop above
+        if byte_len * 8 != num_bits {
+            let mut partial_bytes_written = num_bits / 8;
+
+            // if we didn't write the full byte for the last byte, increment by one because
+            // we wrote a partial byte
+            if byte_len * 8 % num_bits != 0 {
+                partial_bytes_written += 1;
+            }
+            src_idx += (byte_len - partial_bytes_written + 1) as usize;
         }
-        println!("{} - {}", byte_len, bytes_written);
-        src_idx += (byte_len - bytes_written + 1) as usize;
     }
 
     dst
@@ -348,7 +363,10 @@ pub mod test {
 
     #[test]
     fn test_pack_bits_2() {
-        let src = UInt32Array::from_iter(vec![1394040161,1641705277]);
+        let src = UInt32Array::from_iter(
+            // vec![1394040161,1641705277],
+            vec![0x01020304, 0x05060708]
+        );
         let data = src.to_data();
         let num_bits = 32;
         let buffer = &data.buffers()[0];
