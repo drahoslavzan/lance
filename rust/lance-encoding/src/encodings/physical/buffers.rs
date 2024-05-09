@@ -3,7 +3,7 @@
 
 use std::{fmt::Debug, ops::{self, AddAssign, BitAnd, BitOr, Shl, ShrAssign}};
 
-use arrow::datatypes::{ArrowPrimitiveType, UInt8Type, UInt32Type};
+use arrow::{array::ArrayData, datatypes::{ArrowPrimitiveType, UInt32Type, UInt8Type}};
 use arrow_array::{cast::AsArray, Array, ArrayRef, PrimitiveArray};
 
 use num_traits::{One, Zero, FromPrimitive, PrimInt, AsPrimitive};
@@ -125,123 +125,25 @@ fn num_bits(arr: ArrayRef) -> Option<u64> {
 
 fn pack_bits_for_type(arr: ArrayRef, num_bits: u64) -> Vec<u8> {
     match arr.data_type() {
-        DataType::UInt8 => {
-            let arr: &PrimitiveArray<UInt8Type> = arr.as_primitive();
-            // let buffers = arr.to_data().buffers();
-            let arr_data = arr.to_data();
-            let buffers = arr_data.buffers();
-            let mut packed_buffers = vec![];
-            for buffer in buffers {
-                let packed_buffer = pack_arrow_bits(&buffer, num_bits);
-                packed_buffers.push(packed_buffer);
-            }
-            let packed_buffers =packed_buffers.concat();
-            return packed_buffers;
-        },
-        // TODO other signed datatypes
-        DataType::UInt32 => {
-            println!("arr {:?}, num_bits {:?}", arr, num_bits);
-            // let arr: &PrimitiveArray<UInt32Type> = arr.as_primitive();
-            let arr_data = arr.to_data();
-            println!("arr_data type = {:?}", arr_data.data_type());
-            let buffers = arr_data.buffers();
-            let mut packed_buffers = vec![];
-            for buffer in buffers {
-                let packed_buffer = pack_bits_again_2(&buffer, num_bits, 4);
-                packed_buffers.push(packed_buffer);
-            }
-            let packed_buffers =packed_buffers.concat();
-            return packed_buffers;
+        DataType::UInt8 | DataType::UInt32 => {
+            pack_buffers(arr.to_data(), num_bits, arr.data_type().byte_width())
         },
         _ => panic!("Unsupported datatype"),
     }
 }
 
-fn pack_bits(src: Vec<u32>, num_bits: u64) -> Vec<u8> {
-    let mut dst = vec![0u8; (src.len() * num_bits as usize ) / 8 + 1];
-    let dst_bit_len = 8;
-    let mut dst_idx = 0;
-    let mut dst_offset = 0;
-
-    let mut mask = 0;
-    for _ in 0..num_bits {
-        mask = (mask << 1) | 1;
+fn pack_buffers(data: ArrayData, num_bits: u64, byte_len: usize) -> Vec<u8> {
+    let buffers = data.buffers();
+    let mut packed_buffers = vec![];
+    for buffer in buffers {
+        let packed_buffer = pack_bits(&buffer, num_bits, byte_len);
+        packed_buffers.push(packed_buffer);
     }
-
-    for src_idx in 0..src.len() {
-        let mut curr_src = src[src_idx] & mask;
-        let mut src_bits_written = 0;
-
-        while src_bits_written < num_bits {
-            dst[dst_idx] += (curr_src << dst_offset) as u8;
-            let bits_written = (num_bits - src_bits_written).min(dst_bit_len - dst_offset);
-            src_bits_written += bits_written;
-            dst_offset += bits_written;
-            curr_src >>= bits_written;
-
-            if dst_offset == dst_bit_len {
-                dst_idx += 1;
-                dst_offset = 0;
-            }
-        }
-    }
-
-    dst
+    packed_buffers.concat()
 }
 
-// fn pack_arrow_bits_2<T>(arr: PrimitiveArray<T>, num_bits: u64) -> Vec<u8> 
-// where
-//     T: ArrowPrimitiveType
-// {
-//     let buffers = arr.to_data().buffers();
-//     let mut packed_buffers = vec![];
-//     for buffer in buffers {
-//         let packed_buffer = pack_arrow_bits(&buffer, num_bits);
-//         packed_buffers.push(packed_buffer);
-//     }
-//     let packed_buffers =packed_buffers.concat();
-//     return packed_buffers;
-// }
 
-fn pack_arrow_bits<T>(src: &[T], num_bits: u64) -> Vec<u8>
-where
-    // TODO, don't really need Debug here
-    T: num_traits::PrimInt + FromPrimitive + AsPrimitive<u8> + ShrAssign<u64> + Debug,
-{
-    let mut dst = vec![0u8; (src.len() * num_bits as usize ) / 8 + 1];
-    let dst_bit_len: u64 = 8;
-    let mut dst_idx = 0;
-    let mut dst_offset: u64 = 0;
-
-    let mut mask: T = FromPrimitive::from_u8(0).unwrap();
-    for _ in 0..num_bits {
-        mask = mask << 1 | FromPrimitive::from_u8(1).unwrap();
-    }
-
-    for src_idx in 0..src.len() {
-        let mut curr_src = src[src_idx] & mask;
-        let mut src_bits_written = 0;
-
-        while src_bits_written < num_bits {
-            // let tmp = 
-            // let tmp2:u8 = tmp.as_();
-            dst[dst_idx] += (curr_src << dst_offset.as_()).as_() as u8;
-            let bits_written = (num_bits - src_bits_written).min(dst_bit_len - dst_offset);
-            src_bits_written += bits_written;
-            dst_offset += bits_written;
-            println!("{:?} {}", curr_src, bits_written);
-            curr_src >>= bits_written;
-
-            if dst_offset == dst_bit_len {
-                dst_idx += 1;
-                dst_offset = 0;
-            }
-        }
-    }
-    dst
-}
-
-fn pack_bits_again_2(src: &[u8], num_bits: u64, byte_len: u64) -> Vec<u8> {
+fn pack_bits(src: &[u8], num_bits: u64, byte_len: usize) -> Vec<u8> {
     // calculate the total number of bytes we need to allocate for the destination.
     // this will be the number of items in the source array times the number of bits.
     let src_items = src.len() / byte_len as usize;
@@ -255,6 +157,7 @@ fn pack_bits_again_2(src: &[u8], num_bits: u64, byte_len: u64) -> Vec<u8> {
     let mut dst = vec![0u8; dst_bytes_total];
     let mut dst_idx = 0;
     let mut dst_offset = 0;
+    let bit_len = byte_len as u64 * 8;
 
     let mut mask = 0u64;
     for _ in 0..num_bits {
@@ -294,15 +197,15 @@ fn pack_bits_again_2(src: &[u8], num_bits: u64, byte_len: u64) -> Vec<u8> {
         // advance source_offset to the next byte if we're not at the end..
         // note that we don't need to do this if we wrote the full number of bits
         // because source index would have been advanced by the inner loop above
-        if byte_len * 8 != num_bits {
+        if bit_len != num_bits {
             let mut partial_bytes_written = num_bits / 8;
 
             // if we didn't write the full byte for the last byte, increment by one because
             // we wrote a partial byte
-            if byte_len * 8 % num_bits != 0 {
+            if bit_len % num_bits != 0 {
                 partial_bytes_written += 1;
             }
-            src_idx += (byte_len - partial_bytes_written + 1) as usize;
+            src_idx += (byte_len as u64 - partial_bytes_written + 1) as usize;
         }
     }
 
@@ -350,7 +253,7 @@ pub mod test {
         let num_bits = 3;
         // let result = pack_bits(src, num_bits);
         let buffer = &data.buffers()[0];
-        let result = pack_bits_again_2(&buffer, num_bits, 4);
+        let result = pack_bits(&buffer, num_bits, 4);
         
         let result_str: Vec<String> = result.iter().map(|x| format!("{:08b}", x)).collect();
         let expected_str = vec![
@@ -370,7 +273,7 @@ pub mod test {
         let data = src.to_data();
         let num_bits = 32;
         let buffer = &data.buffers()[0];
-        let result = pack_bits_again_2(&buffer, num_bits, 4);
+        let result = pack_bits(&buffer, num_bits, 4);
         let mut expected = vec![];
         for i in buffer.into_iter() {
             expected.push(*i);
