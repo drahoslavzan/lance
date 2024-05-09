@@ -33,7 +33,11 @@ pub struct EncodedBuffer {
 
     /// The number of bits per value
     pub bits_per_value: u64,
+
+    pub bitpack_meta: Option<pb::BitpackMeta>,
 }
+
+
 
 // Custom impl because buffers shouldn't be included in debug output
 impl std::fmt::Debug for EncodedBuffer {

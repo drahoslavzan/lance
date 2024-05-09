@@ -14,7 +14,7 @@ use snafu::{location, Location};
 use lance_arrow::DataTypeExt;
 use lance_core::{Error, Result};
 
-use crate::encoder::{BufferEncoder, EncodedBuffer};
+use crate::{encoder::{BufferEncoder, EncodedBuffer}, format::pb};
 
 #[derive(Debug, Default)]
 pub struct FlatBufferEncoder {}
@@ -30,6 +30,7 @@ impl BufferEncoder for FlatBufferEncoder {
         Ok(EncodedBuffer {
             bits_per_value,
             parts,
+            bitpack_meta: None,
         })
     }
 }
@@ -63,6 +64,7 @@ impl BufferEncoder for BitmapBufferEncoder {
         let buffer = EncodedBuffer {
             bits_per_value: 1,
             parts,
+            bitpack_meta: None,
         };
         Ok(buffer)
     }
@@ -90,9 +92,16 @@ impl BufferEncoder for BitpackingBufferEncoder {
             packed_arrays.push(packed.into());
         }
 
+
+        let data_type = arrays[0].data_type();
+        let bits_per_value = 8 * data_type.byte_width() as u64;
+
         Ok(EncodedBuffer {
             bits_per_value: num_bits,
             parts: packed_arrays,
+            bitpack_meta: Some(pb::BitpackMeta{
+                uncompressed_bits_per_value: bits_per_value,
+            }),
         })
     }
 }

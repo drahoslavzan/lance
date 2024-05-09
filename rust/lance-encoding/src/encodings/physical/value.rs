@@ -129,6 +129,7 @@ pub struct ValueEncoder {
 
 impl ValueEncoder {
     pub fn try_new(data_type: &DataType) -> Result<Self> {
+        // TODO need to support this for other datatypes
         if *data_type == DataType::UInt32 {
             return Ok(Self {
                 buffer_encoder: Box::<BitpackingBufferEncoder>::default(),
@@ -169,6 +170,7 @@ impl ArrayEncoder for ValueEncoder {
                     buffer_index: index,
                     buffer_type: pb::buffer::BufferType::Page as i32,
                 }),
+                bitpack_meta: None,
             })),
         };
 

@@ -10,6 +10,7 @@ use self::{
 
 pub mod basic;
 pub mod bitmap;
+pub mod bitpack;
 pub mod buffers;
 pub mod fixed_size_list;
 pub mod value;
@@ -52,6 +53,14 @@ fn get_buffer_decoder(
     encoding: &pb::Flat,
     buffers: &PageBuffers,
 ) -> Box<dyn PhysicalPageScheduler> {
+    if let Some(bitpack_meta) = encoding.bitpack_meta.as_ref() {
+        return Box::new(bitpack::BitpackedScheduler::new(
+            encoding.bits_per_value,
+            bitpack_meta.uncompressed_bits_per_value,
+            get_buffer(encoding.buffer.as_ref().unwrap(), buffers)
+        ))
+    }
+
     match encoding.bits_per_value {
         1 => Box::new(DenseBitmapScheduler::new(get_buffer(
             encoding.buffer.as_ref().unwrap(),

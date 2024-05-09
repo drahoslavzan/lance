@@ -161,6 +161,14 @@ message Flat {
   uint64 bits_per_value = 1;
   // the buffer of values
   Buffer buffer = 2;
+
+  // additional metadata that should be present if bitpacking is used
+  optional BitpackMeta bitpack_meta = 4;
+}
+
+message BitpackMeta {
+  // the number of the bits per value in the uncompressed representation.
+  uint64 uncompressed_bits_per_value = 6;
 }
 
 // An array encoding for shredded structs that will never be null
