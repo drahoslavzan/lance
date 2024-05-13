@@ -322,8 +322,6 @@ impl CompositeDecodeTask {
             .into_iter()
             .map(|task| task.decode())
             .collect::<Result<Vec<_>>>()?;
-
-        // println!("{:?}", arrays);
         let array_refs = arrays.iter().map(|arr| arr.as_ref()).collect::<Vec<_>>();
         // TODO: If this is a primitive column we should be able to avoid this
         // allocation + copy with "page bridging" which could save us a few CPU
