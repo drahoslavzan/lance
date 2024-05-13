@@ -76,8 +76,13 @@ impl PhysicalPageScheduler for BitpackedScheduler {
 }
 
 struct BitpackedPageDecoder {
+    // the number of bits used to represent a compressed value. E.g. if the max value
+    // in the page was 7 (0b111), then this will be 3
     bits_per_value: u64,
+
+    // number of bits in the uncompressed value. E.g. this will be 32 for u32
     uncompressed_bits_per_value: u64,
+
     data: Vec<Bytes>,
 }
 
@@ -101,7 +106,7 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
         let mut rows_taken = 0;
         let byte_len = self.uncompressed_bits_per_value / 8;
         let dst = &mut dest_buffers[0];
-        let mut dst_idx = dst.len();
+        let mut dst_idx = dst.len(); // index for current byte being written to destination buffer
 
         // pre-add enough capacity to the buffer to hold all the values we're about to put in it
         let capacity_to_add = dst.capacity() as i64 - dst.len() as i64 + num_rows as i64;
@@ -111,6 +116,7 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
             dst.extend((0..bytes_to_add).into_iter().map(|_| 0));
         }
 
+        // create bitmask for source bits
         let mut mask = 0u64;
         for _ in 0..self.bits_per_value {
             mask = mask << 1 | 1;
@@ -118,22 +124,34 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
 
         for src in &self.data {
             let buf_len = src.len() as u64;
+
+            // skip entire buffer 
             if bytes_to_skip >= buf_len {
                 bytes_to_skip -= buf_len;
                 continue;
             }
 
-            // start at the first offset we're not skipping
+            // the index of the current byte being read from the source buffer
             let mut src_idx = bytes_to_skip as usize;
+
+            // bit offset within the current source byte
             let mut src_offset = 0;
+
             while src_idx < src.len() && rows_taken < num_rows {
                 rows_taken += 1;
-                let mut curr_mask = mask;
+                let mut curr_mask = mask; // copy mask
+                
+                // current source byte being written to destination
                 let mut curr_src = src[src_idx] >> src_offset & curr_mask as u8;
+                
+                // how many bits from the current source value have been written to destination
                 let mut src_bits_written = 0;
+
+                // the offset within the current destination byte to write to
                 let mut dst_offset = 0;
 
                 while src_bits_written < self.bits_per_value {
+                    // write bits from current source byte into destination
                     dst[dst_idx] += (curr_src) << dst_offset;
                     let bits_written = (self.bits_per_value - src_bits_written)
                         .min(8 - src_offset)
@@ -158,7 +176,7 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
                     }
                 }
 
-                // advance source_offset to the next byte if we're not at the end..
+                // advance destination offset to the next location
                 // note that we don't need to do this if we wrote the full number of bits
                 // because source index would have been advanced by the inner loop above
                 if self.uncompressed_bits_per_value != self.bits_per_value {
