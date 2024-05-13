@@ -117,7 +117,7 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
 
         for src in &self.data {
             let buf_len = src.len() as u64;
-            if bytes_to_skip > buf_len {
+            if bytes_to_skip >= buf_len {
                 bytes_to_skip -= buf_len;
                 continue;
             }

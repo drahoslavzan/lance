@@ -227,7 +227,6 @@ async fn check_round_trip_encoding_inner(
         Some(concat(&data.iter().map(|arr| arr.as_ref()).collect::<Vec<_>>()).unwrap())
     };
 
-    /*
     // We always try a full decode, regardless of the test cases provided
     debug!("Testing full decode");
     let scheduler_copy = scheduler.clone();
@@ -267,7 +266,6 @@ async fn check_round_trip_encoding_inner(
         )
         .await;
     }
-    */
 
     // Test take scheduling
     for indices in &test_cases.indices {
@@ -329,14 +327,12 @@ async fn check_round_trip_field_encoding_random(
                 .with_range(0..500)
                 .with_range(100..1100)
                 .with_range(8000..8500)
-                // TODO TODO TODO -- reuncomment this
-                // .with_indices(vec![100])
-                // .with_indices(vec![0])
-                // .with_indices(vec![9999])
-                // .with_indices(vec![100, 1100, 5000])
-                // .with_indices(vec![1000, 2000, 3000])
-                // .with_indices(vec![2000, 2001, 2002, 2003, 2004])
-                
+                .with_indices(vec![100])
+                .with_indices(vec![0])
+                .with_indices(vec![9999])
+                .with_indices(vec![100, 1100, 5000])
+                .with_indices(vec![1000, 2000, 3000])
+                .with_indices(vec![2000, 2001, 2002, 2003, 2004])
                 // Big take that spans multiple pages and generates multiple output batches
                 .with_indices((100..500).map(|i| i * 3).collect::<Vec<_>>());
 
