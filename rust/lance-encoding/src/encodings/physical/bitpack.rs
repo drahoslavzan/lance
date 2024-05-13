@@ -106,7 +106,8 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
         // pre-add enough capacity to the buffer to hold all the values we're about to put in it
         let capacity_to_add = dst.capacity() as i64 - dst.len() as i64 + num_rows as i64;
         if capacity_to_add > 0 {
-            let bytes_to_add = capacity_to_add as usize * self.uncompressed_bits_per_value as usize / 8;
+            let bytes_to_add =
+                capacity_to_add as usize * self.uncompressed_bits_per_value as usize / 8;
             dst.extend((0..bytes_to_add).into_iter().map(|_| 0));
         }
 
@@ -172,7 +173,6 @@ impl PhysicalPageDecoder for BitpackedPageDecoder {
                 }
             }
         }
-        
     }
 
     fn num_buffers(&self) -> u32 {
@@ -187,8 +187,8 @@ pub mod test {
 
     #[test]
     fn test_decode_into() {
-        let src_buffer = vec![ 0b11_010_001, 0b0_101_100_0, 0b111_11 ];
-        let unit = BitpackedPageDecoder{
+        let src_buffer = vec![0b11_010_001, 0b0_101_100_0, 0b111_11];
+        let unit = BitpackedPageDecoder {
             bits_per_value: 3,
             uncompressed_bits_per_value: 32,
             data: vec![Bytes::copy_from_slice(&src_buffer)],
@@ -198,6 +198,5 @@ pub mod test {
         unit.decode_into(0, 7, &mut dest);
 
         println!("{:?}", dest);
-
     }
 }
