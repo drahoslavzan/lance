@@ -156,7 +156,6 @@ fn pack_buffers(data: ArrayData, num_bits: u64, byte_len: usize) -> Vec<u8> {
     let mut packed_buffers = vec![];
     for buffer in buffers {
         let packed_buffer = pack_bits(&buffer, num_bits, byte_len);
-        println!("PACKED BUFFER: {:?}", packed_buffer);
         packed_buffers.push(packed_buffer);
     }
     packed_buffers.concat()
