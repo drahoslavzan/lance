@@ -57,8 +57,8 @@ fn get_buffer_decoder(
         return Box::new(bitpack::BitpackedScheduler::new(
             encoding.bits_per_value,
             bitpack_meta.uncompressed_bits_per_value,
-            get_buffer(encoding.buffer.as_ref().unwrap(), buffers)
-        ))
+            get_buffer(encoding.buffer.as_ref().unwrap(), buffers),
+        ));
     }
 
     match encoding.bits_per_value {

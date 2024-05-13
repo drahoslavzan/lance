@@ -37,8 +37,6 @@ pub struct EncodedBuffer {
     pub bitpack_meta: Option<pb::BitpackMeta>,
 }
 
-
-
 // Custom impl because buffers shouldn't be included in debug output
 impl std::fmt::Debug for EncodedBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
