@@ -170,7 +170,7 @@ impl ArrayEncoder for ValueEncoder {
                     buffer_index: index,
                     buffer_type: pb::buffer::BufferType::Page as i32,
                 }),
-                bitpack_meta: None,
+                bitpack_meta: encoded_buffer.bitpack_meta,
             })),
         };
 

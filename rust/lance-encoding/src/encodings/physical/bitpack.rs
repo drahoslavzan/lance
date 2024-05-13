@@ -89,15 +89,30 @@ struct BitpackedPageDecoder {
 impl PhysicalPageDecoder for BitpackedPageDecoder {
     fn update_capacity(
         &self,
+        // TODO handle rows to skip
         _rows_to_skip: u32,
-        _num_rows: u32,
-        _buffers: &mut [(u64, bool)],
+        num_rows: u32,
+        buffers: &mut [(u64, bool)],
+        // TODO handle all nulls
         _all_null: &mut bool,
     ) {
-        todo!()
+        // TODO -- not sure if this is correct
+        buffers[0].0 = self.uncompressed_bits_per_value / 8 * num_rows as u64;
+        buffers[0].1 = true;
     }
 
-    fn decode_into(&self, _rows_to_skip: u32, _num_rows: u32, _dest_buffers: &mut [BytesMut]) {
+    fn decode_into(&self, _rows_to_skip: u32, _num_rows: u32, dest_buffers: &mut [BytesMut]) {
+        let mut i = 0;
+        for buf in &self.data {
+            for b in buf.iter() {
+                i += 1;
+                println!("{:?}", b);
+                if i > 100 {
+                    todo!()
+                }
+            }
+        }
+        println!("HELLO");
         todo!()
     }
 
